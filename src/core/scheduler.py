@@ -1,8 +1,9 @@
 """Scheduler module."""
-from time import time
 from typing import Coroutine, Tuple
 import heapq
 from collections import deque
+from time import time, sleep
+from .fd_monitor import FileDescriptorMonitor
 
 
 class Awaitable:
@@ -22,6 +23,7 @@ class Scheduler:
         self._current_coro: Coroutine | None = None
         self._closed = False
         self._seq = 0
+        self.fd_monitor = FileDescriptorMonitor()
 
     def _get_sleeping(self):
         if self._sleeping:
@@ -30,6 +32,15 @@ class Scheduler:
                 heapq.heappop(self._sleeping)
                 return coro
         return None
+
+    @property
+    def current(self):
+        """Get current running coroutine."""
+        return self._current_coro
+
+    @current.setter  # noqa
+    def current(self, coro: Coroutine | None):
+        self._current_coro = coro
 
     @property
     def closed(self):
@@ -59,6 +70,11 @@ class Scheduler:
     def run(self) -> None:
         """Run the scheduler."""
         while not self._closed:
+            read_ready, write_ready = self.fd_monitor.monitor()
+            for ready in read_ready:
+                self._pending.append(self.fd_monitor.get_read_fd_coros(ready))
+            for ready in write_ready:
+                self._pending.append(self.fd_monitor.get_write_fd_coros(ready))
             coro = self._get_sleeping()
             if coro is not None:
                 self._pending.append(coro)
@@ -88,3 +104,15 @@ class Scheduler:
             self.call_later(self._current_coro, seconds)
         self._current_coro = None
         await self.switch()
+
+
+_scheduler = Scheduler()
+
+
+def get_scheduler():
+    return _scheduler
+
+
+def set_scheduler(scheduler: Scheduler):
+    global _scheduler
+    _scheduler = scheduler
