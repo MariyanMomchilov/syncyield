@@ -2,7 +2,7 @@
 from typing import Coroutine, Tuple
 import heapq
 from collections import deque
-from time import time, sleep
+from time import time
 from .fd_monitor import FileDescriptorMonitor
 
 
@@ -17,7 +17,6 @@ class Scheduler:
     """Scheduler class. Manages scheduling and execution of coroutines."""
 
     def __init__(self) -> None:
-        """Init."""
         self._pending: deque[Coroutine] = deque()
         self._sleeping: list[Tuple[float, int, Coroutine]] = []
         self._current_coro: Coroutine | None = None
@@ -38,7 +37,7 @@ class Scheduler:
         """Get current running coroutine."""
         return self._current_coro
 
-    @current.setter  # noqa
+    @current.setter
     def current(self, coro: Coroutine | None):
         self._current_coro = coro
 
@@ -46,6 +45,10 @@ class Scheduler:
     def closed(self):
         """Check if scheduler is closed."""
         return self._closed
+
+    @property
+    def empty(self):
+        return len(self._pending) == 0 and len(self._sleeping) == 0
 
     def close(self):
         """Close the scheduler for further execution and scheduling."""
@@ -67,14 +70,42 @@ class Scheduler:
         heapq.heappush(self._sleeping, (time() + seconds, self._seq, coro))
         self._seq += 1
 
+
+    def remove_from_scheduler(self, coro: Coroutine):
+        """Remove coroutine from scheduler."""
+        if coro in self._pending:
+            self._pending.remove(coro)
+            return
+
+        for fd, coro_lst in self.fd_monitor._readers.items():
+            if coro in coro_lst:
+                lst = coro_lst
+                lst.remove(coro)
+                self.fd_monitor._readers[fd] = lst
+                return
+
+        for fd, coro_lst in self.fd_monitor._writers.items():
+            if coro in coro_lst:
+                lst = coro_lst
+                lst.remove(coro)
+                self.fd_monitor._writers[fd] = lst
+                return
+
+        new_heap: list[tuple[float, int, Coroutine]] = []
+        for t in self._sleeping:
+            if t[2] is not coro:
+                heapq.heappush(new_heap, t)
+        self._sleeping = new_heap
+
+
     def run(self) -> None:
         """Run the scheduler."""
-        while not self._closed:
+        while not self._closed and not self.empty:
             read_ready, write_ready = self.fd_monitor.monitor()
             for ready in read_ready:
-                self._pending.append(self.fd_monitor.get_read_fd_coros(ready))
+                self._pending.append(self.fd_monitor.get_read_fd_coro(ready))
             for ready in write_ready:
-                self._pending.append(self.fd_monitor.get_write_fd_coros(ready))
+                self._pending.append(self.fd_monitor.get_write_fd_coro(ready))
             coro = self._get_sleeping()
             if coro is not None:
                 self._pending.append(coro)
@@ -85,6 +116,7 @@ class Scheduler:
                 self._current_coro.send(None)
                 if self._current_coro is not None:
                     self.call_soon(self._current_coro)
+                    self._current_coro = None
             except StopIteration:
                 pass
             except Exception:
@@ -99,9 +131,7 @@ class Scheduler:
         if seconds < 0:
             raise ValueError('seconds must be non negative')
 
-        # condition is always true (mypy)
-        if self._current_coro is not None:
-            self.call_later(self._current_coro, seconds)
+        self.call_later(self._current_coro, seconds)  # type: ignore
         self._current_coro = None
         await self.switch()
 

@@ -4,17 +4,21 @@ from select import select
 
 
 class FileDescriptorMonitor:
-    """Monitoring support for file descriptors."""
 
     def __init__(self) -> None:
-        self._readers: dict[int, Coroutine] = {}
-        self._writers: dict[int, Coroutine] = {}
+        """Init."""
+        self._readers: dict[int, list[Coroutine]] = {}
+        self._writers: dict[int, list[Coroutine]] = {}
 
     def watch_read(self, fd: int, coro: Coroutine):
-        self._readers[fd] = coro
+        coros = self._readers.get(fd, [])
+        coros.append(coro)
+        self._readers[fd] = coros
 
     def watch_write(self, fd: int, coro: Coroutine):
-        self._writers[fd] = coro
+        coros = self._writers.get(fd, [])
+        coros.append(coro)
+        self._writers[fd] = coros
 
     def remove_read(self, fd: int):
         self._readers.pop(fd, None)
@@ -22,11 +26,13 @@ class FileDescriptorMonitor:
     def remove_write(self, fd: int):
         self._writers.pop(fd, None)
 
-    def get_read_fd_coros(self, fd: int):
-        return self._readers.get(fd)
-    
-    def get_write_fd_coros(self, fd: int):
-        return self._writers.get(fd)
+    def get_read_fd_coro(self, fd: int):
+        coro = self._readers.get(fd, []).pop(0)
+        return coro
+
+    def get_write_fd_coro(self, fd: int):
+        coro = self._writers.get(fd, []).pop(0)
+        return coro
 
     def monitor(self) -> tuple[list[int], list[int]]:
         if len(self._readers) == 0 and len(self._writers) == 0:

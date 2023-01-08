@@ -3,46 +3,33 @@ from collections import deque
 
 from src.core.scheduler import Scheduler
 
-
 count_container = []
 
 
-def close_counter_handler(counter: int):
-    def close_sched(sched: Scheduler):
-        nonlocal counter
-        counter -= 1
-        if counter == 0:
-            sched.close()
-    return close_sched
-
-
 @coroutine
-def _countup(to: int, sched: Scheduler, handler):
+def _countup(to: int):
     i = 0
     while i < to:
         count_container.append(i)
         yield i
         i += 1
-    handler(sched)
 
 
 @coroutine
-def _countdown(to: int, sched: Scheduler, handler):
+def _countdown(to: int):
     i = to - 1
     while i >= 0:
         count_container.append(i)
         yield i
         i -= 1
-    handler(sched)
 
 
 def test_scheduler_only_call_soon():
     global count_container
     count_container = []
-    signal_close = close_counter_handler(2)
     sched = Scheduler()
-    sched.call_soon(_countup(5, sched, signal_close))
-    sched.call_soon(_countdown(5, sched, signal_close))
+    sched.call_soon(_countup(5))
+    sched.call_soon(_countdown(5))
     sched.run()
     assert count_container == [0, 4, 1, 3, 2, 2, 3, 1, 4, 0]
 
@@ -51,9 +38,8 @@ def test_scheduler_call_later():
     global count_container
     count_container = []
     sched = Scheduler()
-    signal_close = close_counter_handler(2)
-    sched.call_later(_countup(5, sched, signal_close), 1)
-    sched.call_soon(_countdown(5, sched, signal_close))
+    sched.call_later(_countup(5), 1)
+    sched.call_soon(_countdown(5))
     sched.run()
     assert count_container == [4, 3, 2, 1, 0, 0, 1, 2, 3, 4]
 
