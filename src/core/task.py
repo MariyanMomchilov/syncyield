@@ -40,16 +40,21 @@ class Task:
 
     def start(self):
         """Schedules the Task for execution and updates the result value."""
+        if self.canceled:
+            raise CancelledTask()
+
         sched = get_scheduler()
         self._cb_sent = self._call_soon_cb()
         sched.call_soon(self._cb_sent)
 
     async def _call_soon_cb(self):
         try:
-            result = await self.coro()
+            result = await self.coro
             self._result = result
         except Exception as e:
             self._exception = e
+        finally:
+            self._done = True
 
     @property
     def result(self):
